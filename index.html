@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Whiteboard">
+<meta name="theme-color" content="#ffffff">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="manifest" href="manifest.json">
+<title>Whiteboard</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #f8f7f4;
+    --toolbar-bg: rgba(255,255,255,0.92);
+    --toolbar-border: rgba(0,0,0,0.1);
+    --btn-hover: rgba(0,0,0,0.06);
+    --btn-active-bg: #1a1a1a;
+    --btn-active-color: #fff;
+    --text: #1a1a1a;
+    --text-muted: #888;
+    --accent: #534AB7;
+    --shadow: 0 2px 16px rgba(0,0,0,0.1);
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1a;
+      --toolbar-bg: rgba(30,30,30,0.95);
+      --toolbar-border: rgba(255,255,255,0.1);
+      --btn-hover: rgba(255,255,255,0.08);
+      --btn-active-bg: #fff;
+      --btn-active-color: #1a1a1a;
+      --text: #f0f0f0;
+      --text-muted: #666;
+      --shadow: 0 2px 16px rgba(0,0,0,0.4);
+    }
+  }
+
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif; }
+
+  #canvas-wrap { position: fixed; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+
+  #toolbar {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 4px;
+    background: var(--toolbar-bg);
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    border: 0.5px solid var(--toolbar-border);
+    border-radius: 20px;
+    padding: 8px 12px;
+    box-shadow: var(--shadow);
+    z-index: 100;
+    max-width: calc(100vw - 24px);
+    flex-wrap: nowrap;
+  }
+
+  .tb-btn {
+    width: 38px; height: 38px; border-radius: 10px;
+    border: none; background: transparent; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; color: var(--text); transition: background 0.15s, transform 0.1s;
+    -webkit-tap-highlight-color: transparent; flex-shrink: 0;
+  }
+  .tb-btn:active { transform: scale(0.92); }
+  .tb-btn:hover { background: var(--btn-hover); }
+  .tb-btn.active { background: var(--btn-active-bg); color: var(--btn-active-color); }
+
+  .sep { width: 1px; height: 22px; background: var(--toolbar-border); margin: 0 3px; flex-shrink: 0; }
+
+  .color-btn {
+    width: 24px; height: 24px; border-radius: 50%; border: 2.5px solid transparent;
+    cursor: pointer; flex-shrink: 0; transition: transform 0.1s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .color-btn.active { border-color: var(--text); transform: scale(1.15); }
+  .color-btn:active { transform: scale(0.9); }
+
+  #size-wrap { display: flex; align-items: center; gap: 4px; }
+  #size-slider {
+    -webkit-appearance: none; width: 64px; height: 4px;
+    border-radius: 2px; background: var(--toolbar-border); outline: none; cursor: pointer;
+  }
+  #size-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 16px; height: 16px;
+    border-radius: 50%; background: var(--text); cursor: pointer;
+  }
+
+  #page-info { font-size: 12px; color: var(--text-muted); min-width: 44px; text-align: center; user-select: none; }
+
+  #palm-btn {
+    font-size: 11px; font-weight: 500; padding: 5px 8px; border-radius: 8px;
+    border: 0.5px solid var(--toolbar-border); background: transparent;
+    color: var(--text-muted); cursor: pointer; white-space: nowrap; flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #palm-btn.on { background: #e8f5e9; color: #2e7d32; border-color: #81c784; }
+
+  #toast {
+    position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.75); color: #fff; padding: 8px 16px;
+    border-radius: 20px; font-size: 13px; opacity: 0; pointer-events: none;
+    transition: opacity 0.3s; z-index: 200; white-space: nowrap;
+  }
+  #toast.show { opacity: 1; }
+
+  #save-dot {
+    position: fixed; top: 14px; right: 16px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #4caf50; z-index: 100; transition: background 0.3s;
+  }
+  #save-dot.saving { background: #ff9800; }
+</style>
+</head>
+<body>
+
+<div id="canvas-wrap"><canvas id="c"></canvas></div>
+<div id="save-dot" title="Auto-saved"></div>
+<div id="toast"></div>
+
+<div id="toolbar">
+  <button class="tb-btn active" id="btn-pen" title="Pen">✏️</button>
+  <button class="tb-btn" id="btn-marker" title="Marker">🖊</button>
+  <button class="tb-btn" id="btn-eraser" title="Eraser">⬜</button>
+  <div class="sep"></div>
+  <div class="color-btn active" style="background:#1a1a1a" data-c="#1a1a1a"></div>
+  <div class="color-btn" style="background:#534AB7" data-c="#534AB7"></div>
+  <div class="color-btn" style="background:#D85A30" data-c="#D85A30"></div>
+  <div class="color-btn" style="background:#1D9E75" data-c="#1D9E75"></div>
+  <div class="color-btn" style="background:#BA7517" data-c="#BA7517"></div>
+  <div class="color-btn" style="background:#D4537E" data-c="#D4537E"></div>
+  <div class="sep"></div>
+  <div id="size-wrap"><input type="range" id="size-slider" min="1" max="24" value="3" step="1"></div>
+  <div class="sep"></div>
+  <button class="tb-btn" id="btn-undo" title="Undo">↩️</button>
+  <button class="tb-btn" id="btn-redo" title="Redo">↪️</button>
+  <div class="sep"></div>
+  <button class="tb-btn" id="btn-prev" title="Previous page">‹</button>
+  <span id="page-info">1 / 1</span>
+  <button class="tb-btn" id="btn-next" title="Next page">›</button>
+  <button class="tb-btn" id="btn-add" title="Add page">＋</button>
+  <div class="sep"></div>
+  <button id="palm-btn" class="on">🤚 Palm off</button>
+  <div class="sep"></div>
+  <button class="tb-btn" id="btn-clear" title="Clear page">🗑</button>
+  <button class="tb-btn" id="btn-export" title="Export PNG">⬇️</button>
+</div>
+
+<script>
+const DB_NAME = 'whiteboard-db';
+const DB_VER = 1;
+const STORE = 'pages';
+
+let db;
+function openDB() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(DB_NAME, DB_VER);
+    r.onupgradeneeded = e => e.target.result.createObjectStore(STORE, { keyPath: 'id' });
+    r.onsuccess = e => { db = e.target.result; res(db); };
+    r.onerror = rej;
+  });
+}
+function dbSave(id, data) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put({ id, data });
+    tx.oncomplete = res; tx.onerror = rej;
+  });
+}
+function dbLoad(id) {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).get(id);
+    req.onsuccess = e => res(e.target.result ? e.target.result.data : null);
+    req.onerror = rej;
+  });
+}
+function dbLoadAll() {
+  return new Promise((res, rej) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).getAll();
+    req.onsuccess = e => res(e.target.result);
+    req.onerror = rej;
+  });
+}
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  ctx.scale(dpr, dpr);
+  redraw();
+}
+window.addEventListener('resize', resize);
+
+let tool = 'pen', color = '#1a1a1a', size = 3, palmBlock = true;
+let drawing = false, activeId = null;
+let pages = [[]];
+let pi = 0;
+let history = [[JSON.parse(JSON.stringify(pages))]];
+let histPos = 0;
+let saveTimer = null;
+const dot = document.getElementById('save-dot');
+
+function pushHistory() {
+  history = history.slice(0, histPos + 1);
+  history.push(JSON.parse(JSON.stringify(pages)));
+  histPos = history.length - 1;
+  scheduleSave();
+}
+
+function scheduleSave() {
+  dot.className = 'saving';
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveAll, 1200);
+}
+
+async function saveAll() {
+  try {
+    for (let i = 0; i < pages.length; i++) {
+      await dbSave('page-' + i, pages[i]);
+    }
+    await dbSave('meta', { count: pages.length, current: pi });
+    dot.className = '';
+  } catch(e) { console.error('Save failed', e); }
+}
+
+async function loadAll() {
+  try {
+    const meta = await dbLoad('meta');
+    if (!meta) return;
+    pages = [];
+    for (let i = 0; i < meta.count; i++) {
+      const p = await dbLoad('page-' + i);
+      pages.push(p || []);
+    }
+    pi = meta.current || 0;
+    history = [JSON.parse(JSON.stringify(pages))];
+    histPos = 0;
+    updatePageInfo();
+    redraw();
+  } catch(e) { console.error('Load failed', e); }
+}
+
+function redraw() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+  for (const s of pages[pi]) {
+    if (!s.pts || s.pts.length < 2) continue;
+    ctx.beginPath();
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = s.sz;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.globalAlpha = s.alpha || 1;
+    ctx.globalCompositeOperation = s.comp || 'source-over';
+    ctx.moveTo(s.pts[0][0], s.pts[0][1]);
+    for (let i = 1; i < s.pts.length; i++) {
+      const [px, py] = s.pts[i - 1], [cx, cy] = s.pts[i];
+      ctx.quadraticCurveTo(px, py, (px + cx) / 2, (py + cy) / 2);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+}
+
+let cur = null;
+
+function startDraw(x, y, p) {
+  const pressure = p || 0.5;
+  const baseSize = tool === 'marker' ? size * 8 : size;
+  const dynSize = tool === 'pen' ? baseSize * (0.4 + pressure * 0.8) : baseSize;
+  cur = {
+    tool, color: tool === 'eraser' ? '#ffffff' : color,
+    sz: dynSize,
+    alpha: tool === 'marker' ? 0.3 : 1,
+    comp: tool === 'marker' ? 'multiply' : 'source-over',
+    pts: [[x, y]]
+  };
+  pages[pi].push(cur);
+}
+
+function addPt(x, y, p) {
+  if (!cur) return;
+  if (tool === 'pen') cur.sz = size * (0.4 + (p || 0.5) * 0.8);
+  cur.pts.push([x, y]);
+  redraw();
+}
+
+function endDraw() {
+  if (cur) { pushHistory(); cur = null; }
+  drawing = false; activeId = null;
+}
+
+canvas.addEventListener('pointerdown', e => {
+  if (palmBlock) {
+    if (e.pointerType === 'touch' && e.width > 35) return;
+    if (e.pointerType === 'touch' && !e.isPrimary) return;
+  }
+  if (activeId !== null && e.pointerId !== activeId) return;
+  activeId = e.pointerId;
+  drawing = true;
+  canvas.setPointerCapture(e.pointerId);
+  const r = canvas.getBoundingClientRect();
+  startDraw(e.clientX - r.left, e.clientY - r.top, e.pressure);
+  e.preventDefault();
+}, { passive: false });
+
+canvas.addEventListener('pointermove', e => {
+  if (!drawing || e.pointerId !== activeId) return;
+  const r = canvas.getBoundingClientRect();
+  const evts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  for (const ev of evts) addPt(ev.clientX - r.left, ev.clientY - r.top, ev.pressure);
+  e.preventDefault();
+}, { passive: false });
+
+canvas.addEventListener('pointerup', e => { if (e.pointerId === activeId) endDraw(); });
+canvas.addEventListener('pointercancel', e => { if (e.pointerId === activeId) endDraw(); });
+
+function setTool(t) {
+  tool = t;
+  document.querySelectorAll('.tb-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn-' + t).classList.add('active');
+}
+
+document.getElementById('btn-pen').onclick = () => setTool('pen');
+document.getElementById('btn-marker').onclick = () => setTool('marker');
+document.getElementById('btn-eraser').onclick = () => setTool('eraser');
+
+document.querySelectorAll('.color-btn').forEach(d => {
+  d.addEventListener('click', () => {
+    document.querySelectorAll('.color-btn').forEach(x => x.classList.remove('active'));
+    d.classList.add('active');
+    color = d.dataset.c;
+    setTool('pen');
+  });
+});
+
+document.getElementById('size-slider').oninput = e => { size = +e.target.value; };
+
+document.getElementById('btn-undo').onclick = () => {
+  if (histPos > 0) { histPos--; pages = JSON.parse(JSON.stringify(history[histPos])); redraw(); updatePageInfo(); scheduleSave(); }
+};
+document.getElementById('btn-redo').onclick = () => {
+  if (histPos < history.length - 1) { histPos++; pages = JSON.parse(JSON.stringify(history[histPos])); redraw(); updatePageInfo(); scheduleSave(); }
+};
+
+function updatePageInfo() {
+  document.getElementById('page-info').textContent = (pi + 1) + ' / ' + pages.length;
+}
+
+document.getElementById('btn-prev').onclick = () => {
+  if (pi > 0) { pi--; redraw(); updatePageInfo(); scheduleSave(); }
+};
+document.getElementById('btn-next').onclick = () => {
+  if (pi < pages.length - 1) { pi++; redraw(); updatePageInfo(); scheduleSave(); }
+};
+document.getElementById('btn-add').onclick = () => {
+  pages.push([]); pi = pages.length - 1;
+  pushHistory(); redraw(); updatePageInfo();
+  showToast('Page ' + pages.length + ' added');
+};
+
+const pb = document.getElementById('palm-btn');
+pb.onclick = () => {
+  palmBlock = !palmBlock;
+  pb.textContent = palmBlock ? '🤚 Palm off' : '🖐 Palm on';
+  pb.className = palmBlock ? 'on' : '';
+  showToast(palmBlock ? 'Palm rejection on' : 'Palm rejection off');
+};
+
+document.getElementById('btn-clear').onclick = () => {
+  if (confirm('Clear this page?')) {
+    pages[pi] = []; pushHistory(); redraw();
+    showToast('Page cleared');
+  }
+};
+
+document.getElementById('btn-export').onclick = () => {
+  const a = document.createElement('a');
+  a.download = 'whiteboard-p' + (pi + 1) + '.png';
+  a.href = canvas.toDataURL('image/png');
+  a.click();
+  showToast('Exported PNG');
+};
+
+let toastTimer;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+openDB().then(loadAll).then(resize);
+</script>
+</body>
+</html>
