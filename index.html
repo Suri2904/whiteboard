@@ -261,7 +261,30 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);
   <div class="sep"></div>
   <!-- Clear & Export -->
   <button class="btn" id="btn-clear" title="Clear page">🗑</button>
-  <button class="btn" id="btn-exp" title="Export PNG">⬇️</button>
+  <button class="btn" id="btn-exp" title="Export">⬇️</button>
+</div>
+
+<!-- Export panel -->
+<div id="expOv" class="sheet-ov">
+  <div class="sheet">
+    <div class="sheet-hd">
+      <span class="sheet-title">Export</span>
+      <button class="sheet-close" id="expClose">✕</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <button class="btn" id="expPng" style="width:100%;height:76px;border-radius:14px;border:1.5px solid var(--tbr);font-size:13px;flex-direction:column;gap:4px;">
+        <span style="font-size:26px">🖼️</span>
+        <span>This page</span>
+        <small style="color:var(--txm)">PNG file</small>
+      </button>
+      <button class="btn" id="expAllPdf" style="width:100%;height:76px;border-radius:14px;border:1.5px solid var(--tbr);font-size:13px;flex-direction:column;gap:4px;">
+        <span style="font-size:26px">📑</span>
+        <span>All pages</span>
+        <small style="color:var(--txm)">PDF file</small>
+      </button>
+    </div>
+    <p id="expStatus" style="font-size:12px;color:var(--txm);text-align:center;min-height:16px;margin-top:4px;"></p>
+  </div>
 </div>
 
 <script>
@@ -651,20 +674,63 @@ document.getElementById('btn-clear').onclick=()=>{
   if(confirm('Clear this page?')){pages[pi].strokes=[];pages[pi].bgImg=null;pushHist();redraw();toast('Page cleared');}
 };
 
-// ── Export PNG ──
-document.getElementById('btn-exp').onclick=async()=>{
-  // render at full resolution without transform
+// ── Export panel ──
+function openExpPanel(){document.getElementById('expOv').classList.add('op');document.getElementById('expStatus').textContent='';}
+function closeExpPanel(){document.getElementById('expOv').classList.remove('op');}
+document.getElementById('btn-exp').onclick=openExpPanel;
+document.getElementById('expClose').onclick=closeExpPanel;
+document.getElementById('expOv').addEventListener('click',e=>{if(e.target===document.getElementById('expOv'))closeExpPanel();});
+
+// Render a single page to a canvas at screen resolution (no pan/zoom applied)
+async function renderPageToCanvas(pgIdx){
+  const savedPi=pi,savedPanX=panX,savedPanY=panY,savedZoom=zoom;
+  pi=pgIdx;panX=0;panY=0;zoom=1;
+  await redraw();
   const ec=document.createElement('canvas');
   ec.width=W*dpr;ec.height=H*dpr;
-  const ec2=ec.getContext('2d');
-  ec2.fillStyle=darkCanvas?'#1e1e1e':'#ffffff';
-  ec2.fillRect(0,0,ec.width,ec.height);
-  // copy current canvas
-  ec2.drawImage(cv,0,0);
+  ec.getContext('2d').drawImage(cv,0,0);
+  pi=savedPi;panX=savedPanX;panY=savedPanY;zoom=savedZoom;
+  await redraw();
+  return ec;
+}
+
+// Export current page as PNG
+document.getElementById('expPng').onclick=async()=>{
+  document.getElementById('expStatus').textContent='Rendering…';
+  const ec=await renderPageToCanvas(pi);
   const a=document.createElement('a');
   a.download='whiteboard-p'+(pi+1)+'.png';
   a.href=ec.toDataURL('image/png');a.click();
-  toast('Exported PNG');
+  document.getElementById('expStatus').textContent='';
+  closeExpPanel();toast('Page '+(pi+1)+' exported as PNG');
+};
+
+// Export all pages as PDF using jsPDF
+document.getElementById('expAllPdf').onclick=async()=>{
+  const status=document.getElementById('expStatus');
+  // load jsPDF on demand
+  if(!window.jspdf){
+    status.textContent='Loading PDF library…';
+    await new Promise((res,rej)=>{
+      const s=document.createElement('script');
+      s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+      s.onload=res;s.onerror=rej;
+      document.head.appendChild(s);
+    });
+  }
+  const {jsPDF}=window.jspdf;
+  const pw=W,ph=H; // points = pixels at 72dpi
+  const pdf=new jsPDF({orientation:pw>ph?'landscape':'portrait',unit:'px',format:[pw,ph],hotfixes:['px_scaling']});
+  for(let i=0;i<pages.length;i++){
+    status.textContent='Rendering page '+(i+1)+' of '+pages.length+'…';
+    if(i>0)pdf.addPage([pw,ph],pw>ph?'landscape':'portrait');
+    const ec=await renderPageToCanvas(i);
+    const imgData=ec.toDataURL('image/jpeg',0.88);
+    pdf.addImage(imgData,'JPEG',0,0,pw,ph,undefined,'FAST');
+  }
+  pdf.save('whiteboard-all-pages.pdf');
+  status.textContent='';
+  closeExpPanel();toast('All '+pages.length+' pages exported as PDF');
 };
 
 // ── Toast ──
